@@ -54,12 +54,41 @@ jobs:
       - name: 🔧 Patch ffmpeg-kit-react-native — use local AAR
         run: |
           GRADLE="node_modules/ffmpeg-kit-react-native/android/build.gradle"
-          echo "--- Before patch ---"
-          grep -n "ffmpeg-kit" "$GRADLE" || true
-          # Replace the remote Maven AAR with local flatDir AAR
-          sed -i "s|implementation 'com.arthenica:ffmpeg-kit-[^']*'|implementation(name: 'ffmpeg-kit-full-gpl', ext: 'aar')|g" "$GRADLE"
-          echo "--- After patch ---"
-          grep -n "ffmpeg-kit\|implementation" "$GRADLE" | head -20
+
+          python3 - <<'EOF'
+          with open('node_modules/ffmpeg-kit-react-native/android/build.gradle', 'r') as f:
+              content = f.read()
+
+          # 1. Add flatDir to the repositories block inside this library's build.gradle
+          if 'flatDir' not in content:
+              content = content.replace(
+                  'repositories {',
+                  'repositories {\n  flatDir { dirs "$rootDir/libs" }',
+                  1  # only first occurrence
+              )
+
+          # 2. Replace the remote arthenica AAR dependency with local flatDir AAR
+          import re
+          content = re.sub(
+              r"implementation\s+'com\.arthenica:ffmpeg-kit-[^']*'",
+              "implementation(name: 'ffmpeg-kit-full-gpl', ext: 'aar')",
+              content
+          )
+
+          # 3. Fix react-native dynamic version (+) which causes plus() error
+          content = content.replace(
+              "api 'com.facebook.react:react-native:+'",
+              "api 'com.facebook.react:react-native:0.81.5'"
+          )
+
+          with open('node_modules/ffmpeg-kit-react-native/android/build.gradle', 'w') as f:
+              f.write(content)
+
+          print("Patched ffmpeg-kit-react-native/android/build.gradle")
+          EOF
+
+          echo "--- Patched result ---"
+          grep -n "flatDir\|ffmpeg-kit\|react-native" node_modules/ffmpeg-kit-react-native/android/build.gradle | head -20
 
       - name: 🔧 Patch android/app/build.gradle — add flatDir + smart-exception
         run: |
