@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.7vgd7zpmmbzgcs818c1xc",
+      "bundleIdentifier": "com.semihtrn4.duarecorder",
       "infoPlist": {
         "NSCameraUsageDescription": "DualShot kamera erişimi gerektirir",
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone"
@@ -26,7 +26,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.7vgd7zpmmbzgcs818c1xc",
+      "package": "com.semihtrn4.duarecorder",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
