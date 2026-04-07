@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import type { StorageInfo } from '@/types/camera';
 
 // Approximate MB per minute for different settings

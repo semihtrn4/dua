@@ -37,8 +37,11 @@ export function buildFFmpegCommands(
 ) {
   const { portraitPath, landscapePath } = buildOutputPaths(timestamp, format, cacheDirectory);
   return {
-    portraitCmd: `-i "${inputUri}" -vf "crop=ih*9/16:ih" -c:v libx264 -crf 23 -preset ultrafast -y "${portraitPath}"`,
-    landscapeCmd: `-i "${inputUri}" -vf "crop=iw:iw*9/16" -c:v libx264 -crf 23 -preset ultrafast -y "${landscapePath}"`,
+    // Portrait (9:16): yüksekliği korur, genişliği ortadan kırpar
+    portraitCmd: `-i "${inputUri}" -vf "crop=ih*9/16:ih:(iw-ih*9/16)/2:0" -c:v libx264 -crf 23 -preset ultrafast -c:a copy -y "${portraitPath}"`,
+    // Landscape (16:9): genişliği korur, yüksekliği ortadan kırpar
+    // 4K (3840x2160): iw=3840, iw*9/16=2160 → 3840x2160 = 16:9 ✓
+    landscapeCmd: `-i "${inputUri}" -vf "crop=iw:iw*9/16:0:(ih-iw*9/16)/2" -c:v libx264 -crf 23 -preset ultrafast -c:a copy -y "${landscapePath}"`,
   };
 }
 

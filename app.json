@@ -48,16 +48,18 @@
       "expo-font",
       "expo-web-browser",
       [
-        "react-native-vision-camera",
+        "expo-camera",
         {
-          "cameraPermissionText": "DualShot kamera erişimi gerektirir",
-          "enableMicrophonePermission": true
+          "cameraPermission": "Kamera erişimi gerekiyor",
+          "microphonePermission": "Mikrofon erişimi gerekiyor",
+          "recordAudioAndroid": true
         }
       ],
       [
-        "@spreen/ffmpeg-kit-react-native-config",
+        "expo-media-library",
         {
-          "package": "https-gpl"
+          "photosPermission": "Galeri erişimi gerekiyor",
+          "savePhotosPermission": "Galeriye kaydetme izni gerekiyor"
         }
       ]
     ],

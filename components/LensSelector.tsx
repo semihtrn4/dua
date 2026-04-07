@@ -15,9 +15,7 @@ interface LensSelectorProps {
 }
 
 const LENS_OPTIONS: { type: LensType; label: string; multiplier: string }[] = [
-  { type: 'ultrawide', label: 'Ultra Wide', multiplier: '0.5x' },
   { type: 'wide', label: 'Wide', multiplier: '1x' },
-  { type: 'telephoto', label: 'Tele', multiplier: '2x' },
 ];
 
 export function LensSelector({ lens, onChange }: LensSelectorProps) {

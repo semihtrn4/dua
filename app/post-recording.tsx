@@ -1,3 +1,12 @@
+/**
+ * PostRecordingScreen
+ *
+ * Kayıt bittikten sonra:
+ * 1. @sheehanmunim/react-native-ffmpeg ile ham videoyu 9:16 ve 16:9 formatına crop eder
+ * 2. Her iki dosyayı expo-media-library ile galeriye kaydeder
+ * 3. Geçici cache dosyalarını temizler
+ */
+
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -21,21 +30,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as MediaLibrary from 'expo-media-library';
 import * as Haptics from 'expo-haptics';
-import * as FileSystem from 'expo-file-system/legacy';
-import { FFmpegKit, ReturnCode } from '@spreen/ffmpeg-kit-react-native-config';
+import * as FileSystem from 'expo-file-system';
+import { FFmpegKit, ReturnCode } from '@sheehanmunim/react-native-ffmpeg';
 
 import { Colors } from '@/constants/colors';
 import type { RecordingInfo, FileFormat } from '@/types/camera';
-import {
-  buildFilenames,
-  buildOutputPaths,
-  buildFFmpegCommands,
-  buildRecordingsList,
-  cleanupFiles,
-} from '@/utils/videoProcessor';
-
-// Re-export for testing
-export { buildFilenames, buildOutputPaths, buildFFmpegCommands, buildRecordingsList };
+import { buildFilenames, cleanupFiles } from '@/utils/videoProcessor';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,12 +44,8 @@ export { buildFilenames, buildOutputPaths, buildFFmpegCommands, buildRecordingsL
 type ProcessingStatus = 'idle' | 'processing' | 'saving' | 'cleaning' | 'done' | 'error';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// FFmpeg işleme
 // ---------------------------------------------------------------------------
-
-export async function cleanupCacheFiles(uris: string[]): Promise<void> {
-  await cleanupFiles(uris, FileSystem.deleteAsync.bind(FileSystem));
-}
 
 async function processVideo(
   inputUri: string,
@@ -57,35 +53,57 @@ async function processVideo(
   format: FileFormat,
 ): Promise<{ portrait: RecordingInfo; landscape: RecordingInfo }> {
   const { portraitFilename, landscapeFilename } = buildFilenames(timestamp, format);
-  const { portraitPath, landscapePath } = buildOutputPaths(timestamp, format, FileSystem.cacheDirectory!);
-  const { portraitCmd, landscapeCmd } = buildFFmpegCommands(inputUri, timestamp, format, FileSystem.cacheDirectory!);
+  const cacheDir = FileSystem.cacheDirectory!;
+  const portraitPath = `${cacheDir}${portraitFilename}`;
+  const landscapePath = `${cacheDir}${landscapeFilename}`;
 
-  console.log('Running FFmpeg for Portrait…');
+  // Portrait (9:16): crop=ih*9/16:ih — yüksekliği korur, genişliği kırpar
+  const portraitCmd = `-i "${inputUri}" -vf "crop=ih*9/16:ih:(iw-ih*9/16)/2:0" -c:v libx264 -crf 23 -preset ultrafast -c:a copy -y "${portraitPath}"`;
+
+  // Landscape (16:9): crop=iw:iw*9/16 — genişliği korur, yüksekliği kırpar
+  // 4K (3840x2160): iw=3840, iw*9/16=2160 → 3840x2160 = 16:9 ✓
+  const landscapeCmd = `-i "${inputUri}" -vf "crop=iw:iw*9/16:0:(ih-iw*9/16)/2" -c:v libx264 -crf 23 -preset ultrafast -c:a copy -y "${landscapePath}"`;
+
+  // Portrait işleme
   const portraitSession = await FFmpegKit.execute(portraitCmd);
-  const portraitRC = await portraitSession.getReturnCode();
+  const portraitCode = await portraitSession.getReturnCode();
+  if (!ReturnCode.isSuccess(portraitCode)) {
+    const logs = await portraitSession.getAllLogsAsString();
+    throw new Error(`Portrait video işleme başarısız oldu. ${logs ?? ''}`);
+  }
 
-  console.log('Running FFmpeg for Landscape…');
+  // Landscape işleme
   const landscapeSession = await FFmpegKit.execute(landscapeCmd);
-  const landscapeRC = await landscapeSession.getReturnCode();
-
-  if (!ReturnCode.isSuccess(portraitRC) || !ReturnCode.isSuccess(landscapeRC)) {
-    throw new Error('Video işleme başarısız oldu.');
+  const landscapeCode = await landscapeSession.getReturnCode();
+  if (!ReturnCode.isSuccess(landscapeCode)) {
+    const logs = await landscapeSession.getAllLogsAsString();
+    throw new Error(`Landscape video işleme başarısız oldu. ${logs ?? ''}`);
   }
 
   return {
     portrait: {
       uri: portraitPath,
       filename: portraitFilename,
-      duration: 0, // caller will fill in
+      duration: 0,
       aspectRatio: '9:16',
     },
     landscape: {
       uri: landscapePath,
       filename: landscapeFilename,
-      duration: 0, // caller will fill in
+      duration: 0,
       aspectRatio: '16:9',
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Cache temizliği
+// ---------------------------------------------------------------------------
+
+export async function cleanupCacheFiles(uris: string[]): Promise<void> {
+  await cleanupFiles(uris, (uri, options) =>
+    FileSystem.deleteAsync(uri, options),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -94,15 +112,10 @@ async function processVideo(
 
 const AnimatedCheckmark = () => {
   const scale = useSharedValue(0);
-
   useEffect(() => {
     scale.value = withSpring(1, { damping: 12, stiffness: 100 });
   }, [scale]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
     <Animated.View style={[styles.checkmarkContainer, animatedStyle]}>
       <View style={styles.checkmarkCircle}>
@@ -118,14 +131,21 @@ const AnimatedCheckmark = () => {
 
 export default function PostRecordingScreen() {
   const router = useRouter();
-  const { recordings: recordingsParam, duration: durationParam, mode } = useLocalSearchParams<{
+  const {
+    recordings: recordingsParam,
+    duration: durationParam,
+    mode,
+    format: formatParam,
+  } = useLocalSearchParams<{
     recordings: string;
     duration: string;
     mode: string;
+    format: string;
   }>();
 
   const recordings: RecordingInfo[] = recordingsParam ? JSON.parse(recordingsParam) : [];
   const duration = parseInt(durationParam || '0', 10);
+  const fileFormat: FileFormat = (formatParam === 'mov' ? 'mov' : 'mp4') as FileFormat;
 
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>('idle');
   const [savedCount, setSavedCount] = useState(0);
@@ -137,31 +157,26 @@ export default function PostRecordingScreen() {
 
   useEffect(() => {
     const processAndSave = async () => {
+      const inputUri = recordings[0]?.uri ?? null;
       let portraitPath: string | null = null;
       let landscapePath: string | null = null;
-      const inputUri = recordings[0]?.uri ?? null;
 
       try {
         setProcessingStatus('processing');
         let finalRecordings: RecordingInfo[] = [];
 
-        if (mode === 'dual' && recordings.length > 0 && inputUri) {
-          const original = recordings[0];
+        if (mode === 'dual' && inputUri) {
           const timestamp = Date.now();
-          const format: FileFormat = (original.filename?.endsWith('.mov') ? 'mov' : 'mp4') as FileFormat;
+          const result = await processVideo(inputUri, timestamp, fileFormat);
 
-          const result = await processVideo(inputUri, timestamp, format);
-
-          // Carry over actual duration from original recording
-          result.portrait.duration = original.duration;
-          result.landscape.duration = original.duration;
+          result.portrait.duration = recordings[0]?.duration ?? duration;
+          result.landscape.duration = recordings[0]?.duration ?? duration;
 
           portraitPath = result.portrait.uri;
           landscapePath = result.landscape.uri;
-
           finalRecordings = [result.portrait, result.landscape];
         } else {
-          // Single mode — no FFmpeg, save directly
+          // Single mod — doğrudan kaydet
           finalRecordings = [...recordings];
         }
 
@@ -175,7 +190,6 @@ export default function PostRecordingScreen() {
           setSavedCount(count);
         }
 
-        // Clean up portrait/landscape cache after successful gallery save
         setProcessingStatus('cleaning');
         const toClean: string[] = [];
         if (portraitPath) toClean.push(portraitPath);
@@ -191,7 +205,7 @@ export default function PostRecordingScreen() {
         setProcessingStatus('error');
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       } finally {
-        // Always clean up the original raw video + any leftover cache files
+        // Ham video + kalan cache dosyalarını temizle
         const toClean: string[] = [];
         if (inputUri && mode === 'dual') toClean.push(inputUri);
         if (portraitPath) toClean.push(portraitPath);
@@ -204,7 +218,7 @@ export default function PostRecordingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const formatDuration = (seconds: number): string => {
+  const formatDurationStr = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -217,15 +231,13 @@ export default function PostRecordingScreen() {
 
   const handleViewInPhotos = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (Platform.OS === 'ios') {
-      void Linking.openURL('photos-redirect://');
-    }
+    if (Platform.OS === 'ios') void Linking.openURL('photos-redirect://');
   };
 
   const statusLabel = (): string => {
     switch (processingStatus) {
       case 'processing': return 'Video İşleniyor…';
-      case 'saving': return 'Kaydediliyor…';
+      case 'saving': return 'Galeriye Kaydediliyor…';
       case 'cleaning': return 'Temizleniyor…';
       default: return 'Kaydediliyor…';
     }
@@ -235,16 +247,15 @@ export default function PostRecordingScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Kaydetme durumu */}
       <Animated.View entering={FadeIn.duration(400)} style={styles.successContainer}>
         {saving ? (
           <>
             <ActivityIndicator size="large" color={Colors.recordRed} style={{ marginBottom: 24 }} />
             <Text style={styles.savedText}>{statusLabel()}</Text>
             {processing ? (
-              <Text style={styles.durationText}>Akıllı kırpma (9:16 & 16:9) uygulanıyor</Text>
+              <Text style={styles.durationText}>9:16 ve 16:9 formatları oluşturuluyor…</Text>
             ) : (
-              <Text style={styles.durationText}>{savedCount} / {recordings.length} dosya</Text>
+              <Text style={styles.durationText}>{savedCount} / {mode === 'dual' ? 2 : 1} dosya</Text>
             )}
           </>
         ) : saveError ? (
@@ -259,17 +270,16 @@ export default function PostRecordingScreen() {
           <>
             <AnimatedCheckmark />
             <Animated.Text entering={FadeInUp.delay(200).duration(400)} style={styles.savedText}>
-              Photos'a Kaydedildi ✓
+              Galeriye Kaydedildi ✓
             </Animated.Text>
             <Animated.Text entering={FadeInUp.delay(300).duration(400)} style={styles.durationText}>
-              Süre: {formatDuration(duration)}
+              Süre: {formatDurationStr(duration)}
             </Animated.Text>
           </>
         )}
       </Animated.View>
 
-      {/* Kayıt kartları */}
-      {!saving && (
+      {!saving && processedRecordings.length > 0 && (
         <Animated.View entering={FadeInUp.delay(400).duration(400)} style={styles.thumbnailsContainer}>
           {processedRecordings.map((recording, index) => (
             <Animated.View
@@ -298,23 +308,14 @@ export default function PostRecordingScreen() {
         </Animated.View>
       )}
 
-      {/* Butonlar */}
       {!saving && (
         <Animated.View entering={FadeInUp.delay(600).duration(400)} style={styles.buttonsContainer}>
           {!saveError && (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleViewInPhotos}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.secondaryButtonText}>Photos'ta Görüntüle</Text>
+            <TouchableOpacity style={styles.secondaryButton} onPress={handleViewInPhotos} activeOpacity={0.7}>
+              <Text style={styles.secondaryButtonText}>Galeride Görüntüle</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={handleRecordAgain}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.primaryButton} onPress={handleRecordAgain} activeOpacity={0.7}>
             <Text style={styles.primaryButtonText}>Tekrar Kaydet</Text>
           </TouchableOpacity>
         </Animated.View>
@@ -324,19 +325,9 @@ export default function PostRecordingScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.pureBlack,
-    paddingHorizontal: 24,
-  },
-  successContainer: {
-    alignItems: 'center',
-    marginTop: 60,
-    marginBottom: 40,
-  },
-  checkmarkContainer: {
-    marginBottom: 24,
-  },
+  container: { flex: 1, backgroundColor: Colors.pureBlack, paddingHorizontal: 24 },
+  successContainer: { alignItems: 'center', marginTop: 60, marginBottom: 40 },
+  checkmarkContainer: { marginBottom: 24 },
   checkmarkCircle: {
     width: 80,
     height: 80,
@@ -350,30 +341,11 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  checkmark: {
-    color: Colors.textPrimary,
-    fontSize: 40,
-    fontWeight: '700',
-  },
-  savedText: {
-    color: Colors.textPrimary,
-    fontSize: 26,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  durationText: {
-    color: Colors.textSecondary,
-    fontSize: 17,
-  },
-  thumbnailsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 16,
-    marginBottom: 32,
-  },
-  thumbnailCard: {
-    alignItems: 'center',
-  },
+  checkmark: { color: Colors.textPrimary, fontSize: 40, fontWeight: '700' },
+  savedText: { color: Colors.textPrimary, fontSize: 26, fontWeight: '700', marginBottom: 8 },
+  durationText: { color: Colors.textSecondary, fontSize: 17 },
+  thumbnailsContainer: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 32 },
+  thumbnailCard: { alignItems: 'center' },
   thumbnail: {
     width: 140,
     height: 200,
@@ -388,10 +360,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: Colors.surface,
   },
-  thumbnailIcon: {
-    fontSize: 40,
-    opacity: 0.5,
-  },
+  thumbnailIcon: { fontSize: 40, opacity: 0.5 },
   aspectRatioBadge: {
     position: 'absolute',
     top: 8,
@@ -401,49 +370,23 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-  aspectRatioText: {
-    color: Colors.textPrimary,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  thumbnailInfo: {
-    marginTop: 12,
-    alignItems: 'center',
-    maxWidth: 140,
-  },
-  aspectRatioLabel: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  filenameText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-  },
-  buttonsContainer: {
-    gap: 12,
-  },
+  aspectRatioText: { color: Colors.textPrimary, fontSize: 11, fontWeight: '600' },
+  thumbnailInfo: { marginTop: 12, alignItems: 'center', maxWidth: 140 },
+  aspectRatioLabel: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  filenameText: { color: Colors.textMuted, fontSize: 11 },
+  buttonsContainer: { gap: 12 },
   primaryButton: {
     backgroundColor: Colors.recordRed,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
   },
-  primaryButtonText: {
-    color: Colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '600',
-  },
+  primaryButtonText: { color: Colors.textPrimary, fontSize: 17, fontWeight: '600' },
   secondaryButton: {
     backgroundColor: Colors.surfaceElevated,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
   },
-  secondaryButtonText: {
-    color: Colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '600',
-  },
+  secondaryButtonText: { color: Colors.textPrimary, fontSize: 17, fontWeight: '600' },
 });
