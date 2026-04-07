@@ -61,6 +61,12 @@
           "photosPermission": "Galeri erişimi gerekiyor",
           "savePhotosPermission": "Galeriye kaydetme izni gerekiyor"
         }
+      ],
+      [
+        "@config-plugins/ffmpeg-kit-react-native",
+        {
+          "package": "full-gpl"
+        }
       ]
     ],
     "experiments": {
