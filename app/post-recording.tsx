@@ -31,7 +31,7 @@ import Animated, {
 import * as MediaLibrary from 'expo-media-library';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
-import { FFmpegKit, ReturnCode } from '@sheehanmunim/react-native-ffmpeg';
+import FFmpegKit, { ReturnCode } from '@sheehanmunim/react-native-ffmpeg';
 
 import { Colors } from '@/constants/colors';
 import type { RecordingInfo, FileFormat } from '@/types/camera';
@@ -67,7 +67,7 @@ async function processVideo(
   // Portrait işleme
   const portraitSession = await FFmpegKit.execute(portraitCmd);
   const portraitCode = await portraitSession.getReturnCode();
-  if (!ReturnCode.isSuccess(portraitCode)) {
+  if (!portraitCode.isValueSuccess()) {
     const logs = await portraitSession.getAllLogsAsString();
     throw new Error(`Portrait video işleme başarısız oldu. ${logs ?? ''}`);
   }
@@ -75,7 +75,7 @@ async function processVideo(
   // Landscape işleme
   const landscapeSession = await FFmpegKit.execute(landscapeCmd);
   const landscapeCode = await landscapeSession.getReturnCode();
-  if (!ReturnCode.isSuccess(landscapeCode)) {
+  if (!landscapeCode.isValueSuccess()) {
     const logs = await landscapeSession.getAllLogsAsString();
     throw new Error(`Landscape video işleme başarısız oldu. ${logs ?? ''}`);
   }
