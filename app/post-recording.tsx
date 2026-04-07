@@ -98,15 +98,15 @@ export default function PostRecordingScreen() {
               {
                 uri: portraitPath,
                 filename: `DualShot_${timestamp}_portrait.mp4`,
-                duration: duration,
+                duration: original.duration,
                 aspectRatio: '9:16',
               },
               {
                 uri: landscapePath,
                 filename: `DualShot_${timestamp}_landscape.mp4`,
-                duration: duration,
+                duration: original.duration,
                 aspectRatio: '16:9',
-              },
+              }
             ];
           } else {
             throw new Error('Video işleme başarısız oldu.');

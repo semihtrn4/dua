@@ -56,7 +56,8 @@
         {
           "package": "https-gpl"
         }
-      ]
+      ],
+      "./plugins/withFfmpegFix"
     ],
     "experiments": {
       "typedRoutes": true
