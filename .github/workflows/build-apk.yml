@@ -39,7 +39,7 @@ jobs:
       - name: 📦 Install dependencies
         run: bun install
 
-      - name: 🏗 Prebuild Android (generate native project)
+      - name: 🏗 Prebuild Android
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: bunx expo prebuild --platform android --clean --non-interactive
@@ -47,36 +47,88 @@ jobs:
       - name: 📥 Download ffmpeg-kit AAR (self-hosted mirror)
         run: |
           mkdir -p android/libs
-          curl -L -o android/libs/ffmpeg-kit-full-gpl.aar \
+          curl -fL -o android/libs/ffmpeg-kit-full-gpl.aar \
             https://github.com/NooruddinLakhani/ffmpeg-kit-full-gpl/releases/download/v1.0.0/ffmpeg-kit-full-gpl.aar
+          echo "AAR size: $(du -sh android/libs/ffmpeg-kit-full-gpl.aar)"
 
-      - name: 🔧 Patch ffmpeg-kit-react-native build.gradle (use local AAR)
+      - name: 🔧 Patch ffmpeg-kit-react-native — use local AAR
         run: |
-          FFMPEG_BUILD_GRADLE="node_modules/ffmpeg-kit-react-native/android/build.gradle"
-          # Replace remote AAR dependency with local one
-          sed -i "s|implementation 'com.arthenica:ffmpeg-kit-.*'|implementation(name: 'ffmpeg-kit-full-gpl', ext: 'aar')|g" "$FFMPEG_BUILD_GRADLE"
-          echo "Patched $FFMPEG_BUILD_GRADLE"
+          GRADLE="node_modules/ffmpeg-kit-react-native/android/build.gradle"
+          echo "--- Before patch ---"
+          grep -n "ffmpeg-kit" "$GRADLE" || true
+          # Replace the remote Maven AAR with local flatDir AAR
+          sed -i "s|implementation 'com.arthenica:ffmpeg-kit-[^']*'|implementation(name: 'ffmpeg-kit-full-gpl', ext: 'aar')|g" "$GRADLE"
+          echo "--- After patch ---"
+          grep -n "ffmpeg-kit\|implementation" "$GRADLE" | head -20
 
-      - name: 🔧 Add flatDir + smart-exception to android/app/build.gradle
+      - name: 🔧 Patch android/app/build.gradle — add flatDir + smart-exception
         run: |
-          APP_GRADLE="android/app/build.gradle"
-          # Add flatDir repository
-          sed -i '/^android {/a\    repositories {\n        flatDir { dirs "$rootDir/libs" }\n    }' "$APP_GRADLE"
-          # Add smart-exception-java dependency
-          sed -i '/^dependencies {/a\    implementation '"'"'com.arthenica:smart-exception-java:0.2.1'"'"'' "$APP_GRADLE"
-          echo "Patched $APP_GRADLE"
+          GRADLE="android/app/build.gradle"
+          echo "--- Original android block ---"
+          grep -n "android {" "$GRADLE" | head -3
 
-      - name: 🔧 Add flatDir to android/build.gradle allprojects
+          # Add flatDir repo inside android block
+          python3 - <<'EOF'
+          import re
+
+          with open('android/app/build.gradle', 'r') as f:
+              content = f.read()
+
+          # Add flatDir to repositories if not already present
+          if 'flatDir' not in content:
+              content = content.replace(
+                  'android {',
+                  'android {\n    repositories {\n        flatDir { dirs "$rootDir/libs" }\n    }',
+                  1
+              )
+
+          # Add smart-exception-java to dependencies if not already present
+          if 'smart-exception-java' not in content:
+              content = content.replace(
+                  'dependencies {',
+                  "dependencies {\n    implementation 'com.arthenica:smart-exception-java:0.2.1'",
+                  1
+              )
+
+          with open('android/app/build.gradle', 'w') as f:
+              f.write(content)
+
+          print("Patched android/app/build.gradle")
+          EOF
+
+      - name: 🔧 Patch android/build.gradle — add flatDir to allprojects
         run: |
-          ROOT_GRADLE="android/build.gradle"
-          sed -i '/allprojects {/,/^}/ s|mavenCentral()|mavenCentral()\n        flatDir { dirs "$rootDir/libs" }|' "$ROOT_GRADLE"
-          echo "Patched $ROOT_GRADLE"
+          python3 - <<'EOF'
+          with open('android/build.gradle', 'r') as f:
+              content = f.read()
+
+          if 'flatDir' not in content:
+              content = content.replace(
+                  'mavenCentral()',
+                  'mavenCentral()\n        flatDir { dirs "$rootDir/libs" }',
+                  1
+              )
+
+          with open('android/build.gradle', 'w') as f:
+              f.write(content)
+
+          print("Patched android/build.gradle")
+          EOF
+
+      - name: 🔍 Verify patches
+        run: |
+          echo "=== node_modules/ffmpeg-kit-react-native/android/build.gradle ==="
+          grep -n "ffmpeg-kit\|flatDir\|smart-exception" node_modules/ffmpeg-kit-react-native/android/build.gradle || true
+          echo "=== android/app/build.gradle (first 60 lines) ==="
+          head -60 android/app/build.gradle
+          echo "=== android/build.gradle ==="
+          grep -n "flatDir\|mavenCentral" android/build.gradle || true
 
       - name: 🚀 Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --no-daemon -x lint
+          ./gradlew :app:assembleRelease --no-daemon -x lint --stacktrace
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
 

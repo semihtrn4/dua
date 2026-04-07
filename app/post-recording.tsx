@@ -2,7 +2,7 @@
  * PostRecordingScreen
  *
  * Kayıt bittikten sonra:
- * 1. @sheehanmunim/react-native-ffmpeg ile ham videoyu 9:16 ve 16:9 formatına crop eder
+ * 1. ffmpeg-kit-react-native ile ham videoyu 9:16 ve 16:9 formatına crop eder
  * 2. Her iki dosyayı expo-media-library ile galeriye kaydeder
  * 3. Geçici cache dosyalarını temizler
  */
