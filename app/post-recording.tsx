@@ -22,10 +22,75 @@ import Animated, {
 import * as MediaLibrary from 'expo-media-library';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system/legacy';
-import { FFmpegKit, ReturnCode } from '@sheehanmunim/react-native-ffmpeg';
+import { FFmpegKit, ReturnCode } from '@spreen/ffmpeg-kit-react-native-config';
 
 import { Colors } from '@/constants/colors';
-import type { RecordingInfo } from '@/types/camera';
+import type { RecordingInfo, FileFormat } from '@/types/camera';
+import {
+  buildFilenames,
+  buildOutputPaths,
+  buildFFmpegCommands,
+  buildRecordingsList,
+  cleanupFiles,
+} from '@/utils/videoProcessor';
+
+// Re-export for testing
+export { buildFilenames, buildOutputPaths, buildFFmpegCommands, buildRecordingsList };
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type ProcessingStatus = 'idle' | 'processing' | 'saving' | 'cleaning' | 'done' | 'error';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+export async function cleanupCacheFiles(uris: string[]): Promise<void> {
+  await cleanupFiles(uris, FileSystem.deleteAsync.bind(FileSystem));
+}
+
+async function processVideo(
+  inputUri: string,
+  timestamp: number,
+  format: FileFormat,
+): Promise<{ portrait: RecordingInfo; landscape: RecordingInfo }> {
+  const { portraitFilename, landscapeFilename } = buildFilenames(timestamp, format);
+  const { portraitPath, landscapePath } = buildOutputPaths(timestamp, format, FileSystem.cacheDirectory!);
+  const { portraitCmd, landscapeCmd } = buildFFmpegCommands(inputUri, timestamp, format, FileSystem.cacheDirectory!);
+
+  console.log('Running FFmpeg for Portrait…');
+  const portraitSession = await FFmpegKit.execute(portraitCmd);
+  const portraitRC = await portraitSession.getReturnCode();
+
+  console.log('Running FFmpeg for Landscape…');
+  const landscapeSession = await FFmpegKit.execute(landscapeCmd);
+  const landscapeRC = await landscapeSession.getReturnCode();
+
+  if (!ReturnCode.isSuccess(portraitRC) || !ReturnCode.isSuccess(landscapeRC)) {
+    throw new Error('Video işleme başarısız oldu.');
+  }
+
+  return {
+    portrait: {
+      uri: portraitPath,
+      filename: portraitFilename,
+      duration: 0, // caller will fill in
+      aspectRatio: '9:16',
+    },
+    landscape: {
+      uri: landscapePath,
+      filename: landscapeFilename,
+      duration: 0, // caller will fill in
+      aspectRatio: '16:9',
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Animated checkmark
+// ---------------------------------------------------------------------------
 
 const AnimatedCheckmark = () => {
   const scale = useSharedValue(0);
@@ -47,74 +112,61 @@ const AnimatedCheckmark = () => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// Screen
+// ---------------------------------------------------------------------------
+
 export default function PostRecordingScreen() {
   const router = useRouter();
-  const { recordings: recordingsParam, duration: durationParam } = useLocalSearchParams<{
+  const { recordings: recordingsParam, duration: durationParam, mode } = useLocalSearchParams<{
     recordings: string;
     duration: string;
+    mode: string;
   }>();
 
   const recordings: RecordingInfo[] = recordingsParam ? JSON.parse(recordingsParam) : [];
   const duration = parseInt(durationParam || '0', 10);
 
-  const [saving, setSaving] = useState(true);
-  const [processing, setProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>('idle');
   const [savedCount, setSavedCount] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [processedRecordings, setProcessedRecordings] = useState<RecordingInfo[]>([]);
 
-  const mode = useLocalSearchParams<{ mode: string }>().mode;
+  const saving = processingStatus !== 'done' && processingStatus !== 'error';
+  const processing = processingStatus === 'processing';
 
-  // Kayıtları işle ve Photos'a kaydet
   useEffect(() => {
     const processAndSave = async () => {
+      let portraitPath: string | null = null;
+      let landscapePath: string | null = null;
+      const inputUri = recordings[0]?.uri ?? null;
+
       try {
-        setSaving(true);
-        let finalRecordings = [...recordings];
+        setProcessingStatus('processing');
+        let finalRecordings: RecordingInfo[] = [];
 
-        if (mode === 'dual' && recordings.length > 0) {
-          setProcessing(true);
+        if (mode === 'dual' && recordings.length > 0 && inputUri) {
           const original = recordings[0];
-          const timestamp = new Date().getTime();
-          const portraitPath = `${FileSystem.cacheDirectory}DualShot_${timestamp}_916.mp4`;
-          const landscapePath = `${FileSystem.cacheDirectory}DualShot_${timestamp}_169.mp4`;
+          const timestamp = Date.now();
+          const format: FileFormat = (original.filename?.endsWith('.mov') ? 'mov' : 'mp4') as FileFormat;
 
-          // FFmpeg Komutları (9:16 ve 16:9 crop)
-          // 9:16 için merkeze odaklanır
-          const portraitCmd = `-i ${original.uri} -vf "crop=ih*9/16:ih" -c:v libx264 -crf 23 -preset ultrafast -y ${portraitPath}`;
-          // 16:9 zaten orijinal olabilir ama garantiye alıyoruz
-          const landscapeCmd = `-i ${original.uri} -vf "crop=iw:iw*9/16" -c:v libx264 -crf 23 -preset ultrafast -y ${landscapePath}`;
+          const result = await processVideo(inputUri, timestamp, format);
 
-          console.log('Running FFmpeg for Portrait...');
-          const session916 = await FFmpegKit.execute(portraitCmd);
-          const returnCode916 = await session916.getReturnCode();
+          // Carry over actual duration from original recording
+          result.portrait.duration = original.duration;
+          result.landscape.duration = original.duration;
 
-          console.log('Running FFmpeg for Landscape...');
-          const session169 = await FFmpegKit.execute(landscapeCmd);
-          const returnCode169 = await session169.getReturnCode();
+          portraitPath = result.portrait.uri;
+          landscapePath = result.landscape.uri;
 
-          if (ReturnCode.isSuccess(returnCode916) && ReturnCode.isSuccess(returnCode169)) {
-            finalRecordings = [
-              {
-                uri: portraitPath,
-                filename: `DualShot_${timestamp}_portrait.mp4`,
-                duration: original.duration,
-                aspectRatio: '9:16',
-              },
-              {
-                uri: landscapePath,
-                filename: `DualShot_${timestamp}_landscape.mp4`,
-                duration: original.duration,
-                aspectRatio: '16:9',
-              }
-            ];
-          } else {
-            throw new Error('Video işleme başarısız oldu.');
-          }
-          setProcessing(false);
+          finalRecordings = [result.portrait, result.landscape];
+        } else {
+          // Single mode — no FFmpeg, save directly
+          finalRecordings = [...recordings];
         }
 
         setProcessedRecordings(finalRecordings);
+        setProcessingStatus('saving');
 
         let count = 0;
         for (const rec of finalRecordings) {
@@ -122,18 +174,34 @@ export default function PostRecordingScreen() {
           count++;
           setSavedCount(count);
         }
+
+        // Clean up portrait/landscape cache after successful gallery save
+        setProcessingStatus('cleaning');
+        const toClean: string[] = [];
+        if (portraitPath) toClean.push(portraitPath);
+        if (landscapePath) toClean.push(landscapePath);
+        await cleanupCacheFiles(toClean);
+
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setProcessingStatus('done');
       } catch (err) {
         console.warn('Process or Save error:', err);
-        setSaveError('Kayıt işlemi başarısız oldu.');
+        const message = err instanceof Error ? err.message : 'Kayıt işlemi başarısız oldu.';
+        setSaveError(message);
+        setProcessingStatus('error');
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       } finally {
-        setSaving(false);
-        setProcessing(false);
+        // Always clean up the original raw video + any leftover cache files
+        const toClean: string[] = [];
+        if (inputUri && mode === 'dual') toClean.push(inputUri);
+        if (portraitPath) toClean.push(portraitPath);
+        if (landscapePath) toClean.push(landscapePath);
+        await cleanupCacheFiles(toClean);
       }
     };
+
     void processAndSave();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const formatDuration = (seconds: number): string => {
@@ -154,6 +222,15 @@ export default function PostRecordingScreen() {
     }
   };
 
+  const statusLabel = (): string => {
+    switch (processingStatus) {
+      case 'processing': return 'Video İşleniyor…';
+      case 'saving': return 'Kaydediliyor…';
+      case 'cleaning': return 'Temizleniyor…';
+      default: return 'Kaydediliyor…';
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
@@ -163,7 +240,7 @@ export default function PostRecordingScreen() {
         {saving ? (
           <>
             <ActivityIndicator size="large" color={Colors.recordRed} style={{ marginBottom: 24 }} />
-            <Text style={styles.savedText}>{processing ? 'Video İşleniyor…' : 'Kaydediliyor…'}</Text>
+            <Text style={styles.savedText}>{statusLabel()}</Text>
             {processing ? (
               <Text style={styles.durationText}>Akıllı kırpma (9:16 & 16:9) uygulanıyor</Text>
             ) : (

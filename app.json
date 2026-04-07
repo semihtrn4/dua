@@ -2,7 +2,7 @@
   "expo": {
     "name": "DualShot Recorder",
     "slug": "7vgd7zpmmbzgcs818c1xc",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rork-app",
@@ -29,7 +29,10 @@
       "package": "com.semihtrn4.duarecorder",
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -49,6 +52,12 @@
         {
           "cameraPermissionText": "DualShot kamera erişimi gerektirir",
           "enableMicrophonePermission": true
+        }
+      ],
+      [
+        "@spreen/ffmpeg-kit-react-native-config",
+        {
+          "package": "https-gpl"
         }
       ]
     ],

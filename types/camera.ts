@@ -3,7 +3,7 @@ export type CameraFacing = 'front' | 'back';
 export type Resolution = '1080p' | '4K';
 export type FrameRate = 24 | 30 | 60;
 export type FileFormat = 'mov' | 'mp4';
-export type LensType = 'ultrawide' | 'wide' | 'telephoto';
+export type LensType = 'wide';
 
 export interface CameraSettings {
   mode: CameraMode;
