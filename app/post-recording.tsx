@@ -22,7 +22,7 @@ import Animated, {
 import * as MediaLibrary from 'expo-media-library';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system/legacy';
-import { FFmpegKit, ReturnCode } from 'ffmpeg-kit-react-native';
+import { FFmpegKit, ReturnCode } from '@sheehanmunim/react-native-ffmpeg';
 
 import { Colors } from '@/constants/colors';
 import type { RecordingInfo } from '@/types/camera';

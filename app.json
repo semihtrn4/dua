@@ -50,14 +50,7 @@
           "cameraPermissionText": "DualShot kamera erişimi gerektirir",
           "enableMicrophonePermission": true
         }
-      ],
-      [
-        "@spreen/ffmpeg-kit-react-native-config",
-        {
-          "package": "https-gpl"
-        }
-      ],
-      "./plugins/withFfmpegFix"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
