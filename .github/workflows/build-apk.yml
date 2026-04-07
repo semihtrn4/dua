@@ -19,6 +19,12 @@ jobs:
         with:
           bun-version: latest
 
+      - name: 🏗 Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: 🏗 Setup Expo and EAS
         uses: expo/expo-github-action@v8
         with:
@@ -30,5 +36,12 @@ jobs:
       - name: 📦 Install dependencies
         run: bun install
 
-      - name: 🚀 Build APK
-        run: eas build --platform android --profile apk --non-interactive
+      - name: 🚀 Build APK (Local)
+        run: eas build --platform android --profile apk --local --non-interactive --output=duarecorder.apk
+
+      - name: 📤 Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duarecorder-apk
+          path: duarecorder.apk
+          if-no-files-found: error
