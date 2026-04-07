@@ -15,14 +15,22 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.7vgd7zpmmbzgcs818c1xc"
+      "bundleIdentifier": "app.rork.7vgd7zpmmbzgcs818c1xc",
+      "infoPlist": {
+        "NSCameraUsageDescription": "DualShot kamera erişimi gerektirir",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.7vgd7zpmmbzgcs818c1xc"
+      "package": "app.rork.7vgd7zpmmbzgcs818c1xc",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -52,6 +60,14 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": "https://rork.com/"
+      },
+      "eas": {
+        "projectId": "63286894-6a58-4277-94be-cfd2a5824c52"
+      }
     }
   }
 }
